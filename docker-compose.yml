@@ -6,7 +6,4 @@ services:
     ports:
       - 6001:6001
     volumes:
-      - risuai-save:/app/save
-
-volumes:
-  risuai-save:
+      - /volume2/docker/risusave:/app/save
