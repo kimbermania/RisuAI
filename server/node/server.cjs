@@ -144,8 +144,8 @@ function compositionalHash(obj) {
                 } else {
                     let objectHash = SEED_OBJECT;
                     for (const key in node)
-                        objectHash = (objectHash ^ (Math.imul(calculateHash(key), PRIME_MULTIPLIER) + calculateHash(node[key]))) >>> 0;
-                    return objectHash;
+                        objectHash += (Math.imul(calculateHash(key), PRIME_MULTIPLIER) + calculateHash(node[key]));
+                    return objectHash >>> 0;
                 }
 
             case 'string':
@@ -178,36 +178,43 @@ function compositionalHash(obj) {
     const hash = calculateHash(obj);
     return hash.toString(16); 
 }
-
-// Faster normalization than JSON.parse(JSON.stringify())
+// Exact equivalent of JSON.parse(JSON.stringify()) but faster
 function normalizeJSON(value) {
-    if (value === null || value === undefined) {
-        return null;
-    }
+    if (value === null || value === undefined) return null;
     if (typeof value !== 'object') {
-        if ((typeof value === 'number' && !isFinite(value)) || 
-            typeof value === 'function' || 
+        if (typeof value === 'number' && !isFinite(value)) return null;
+        if (typeof value === 'function' || 
             typeof value === 'symbol' || 
             typeof value === 'bigint') 
-            return null;
+            return undefined; 
         return value;
     }
+    if (value instanceof Date) return value.toISOString();
+    if (value instanceof RegExp || value instanceof Error) return {};
     if (Array.isArray(value)) {
-        const newArray = [];
+        const result = [];
         for (const item of value) {
-            if (item === undefined) newArray.push(null);
-            else newArray.push(normalizeJSON(item));
+            if (item === undefined) {
+                result.push(null);
+            } else {
+                const normalized = normalizeJSON(item);
+                result.push(normalized === undefined ? null : normalized);
+            }
         }
-        return newArray;
+        return result;
     }
-    const newObj = {};
+    const result = {};
     for (const key in value) {
         if (Object.prototype.hasOwnProperty.call(value, key)) {
             const propValue = value[key];
-            if (propValue !== undefined) newObj[key] = normalizeJSON(propValue);
+            if (propValue !== undefined) {
+                const normalized = normalizeJSON(propValue);
+                if (normalized !== undefined) 
+                    result[key] = normalized;
+            }
         }
     }
-    return newObj;
+    return result;
 }
 
 app.get('/', async (req, res, next) => {
@@ -352,15 +359,31 @@ async function hubProxyFunc(req, res) {
         delete headersToSend.host;
         delete headersToSend.connection;
         
+        if (pathAndQuery.startsWith('/hub/')) {
+            headersToSend.origin = hubURL;
+            headersToSend.referer = hubURL + '/';
+            delete headersToSend['sec-fetch-site'];
+            delete headersToSend['sec-fetch-mode'];
+            delete headersToSend['sec-fetch-dest'];
+            delete headersToSend['sec-ch-ua'];
+            delete headersToSend['sec-ch-ua-mobile'];
+            delete headersToSend['sec-ch-ua-platform'];
+        }
+        
         const response = await fetch(externalURL, {
             method: req.method,
             headers: headersToSend,
-            body: req.method !== 'GET' && req.method !== 'HEAD' ? req : undefined,
-            redirect: 'manual',
-            duplex: 'half'
+            body: req.method !== 'GET' && req.method !== 'HEAD' ? JSON.stringify(req.body) : undefined,
+            redirect: 'manual'
         });
         
         for (const [key, value] of response.headers.entries()) {
+            // Skip encoding-related headers to prevent double decoding
+            if (key.toLowerCase() === 'content-encoding' || 
+                key.toLowerCase() === 'content-length' ||
+                key.toLowerCase() === 'transfer-encoding') {
+                continue;
+            }
             res.setHeader(key, value);
         }
         res.status(response.status);
