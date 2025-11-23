@@ -1,5 +1,6 @@
 import { language } from "src/lang"
 import { alertInput } from "../alert"
+import * as fflate from "fflate"
 
 let auth:string = null
 let authChecked = false
@@ -7,13 +8,16 @@ let authChecked = false
 export class NodeStorage{
     async setItem(key:string, value:Uint8Array) {
         await this.checkAuth()
+        // Compress data before sending to reduce payload size
+        const compressed = fflate.compressSync(value)
         const da = await fetch('/api/write', {
             method: "POST",
-            body: value as any,
+            body: compressed as any,
             headers: {
                 'content-type': 'application/octet-stream',
                 'file-path': Buffer.from(key, 'utf-8').toString('hex'),
-                'risu-auth': auth
+                'risu-auth': auth,
+                'risu-compressed': 'true'
             }
         })
         if(da.status < 200 || da.status >= 300){
@@ -41,7 +45,14 @@ export class NodeStorage{
         if (data.length == 0){
             return null
         }
-        return data
+        // Check if data is compressed and decompress if needed
+        try {
+            const decompressed = fflate.decompressSync(new Uint8Array(data))
+            return Buffer.from(decompressed)
+        } catch (error) {
+            // If decompression fails, return raw data (backward compatibility)
+            return data
+        }
     }
     async keys():Promise<string[]>{
         await this.checkAuth()
