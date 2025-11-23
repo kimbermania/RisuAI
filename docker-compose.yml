@@ -9,6 +9,3 @@ services:
       - 6001:6001
     volumes:
       - /volume2/docker/risusave:/app/save
-
-volumes:
-  risuai-save:
