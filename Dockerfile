@@ -23,6 +23,8 @@ FROM deps AS builder
 COPY . .
 # Install including dev deps
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
+# Increase Node.js heap size to prevent OOM during build
+ENV NODE_OPTIONS="--max-old-space-size=4096"
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm build
 
 # ------------------------------------------------------------------------------------------
